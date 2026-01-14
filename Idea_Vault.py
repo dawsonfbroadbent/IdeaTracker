@@ -10,6 +10,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import database as db
 
+# Initialize database tables on first run
+@st.cache_resource
+def initialize_database():
+    """Initialize database tables (runs once per app lifecycle)."""
+    db.init_db()
+    return True
+
+initialize_database()
+
 st.set_page_config(
     page_title="Idea Vault",
     page_icon="🏦",

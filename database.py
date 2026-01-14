@@ -1,19 +1,28 @@
 """
-Database module for Idea Vault - SQLite CRUD operations for problems, ideas, notes, and links.
+Database module for Idea Vault - PostgreSQL (Supabase) CRUD operations.
 """
-import sqlite3
+import os
+import streamlit as st
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
-DB_PATH = Path(__file__).parent / "idea_vault.db"
 
+def get_connection():
+    """Get a database connection from Supabase credentials."""
+    # Try Streamlit secrets first (for Streamlit Cloud), then environment variables
+    try:
+        db_url = st.secrets["DATABASE_URL"]
+    except Exception:
+        db_url = os.environ.get("DATABASE_URL")
 
-def get_connection() -> sqlite3.Connection:
-    """Get a database connection with row factory for dict-like access."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+    if not db_url:
+        raise ValueError(
+            "DATABASE_URL not found. Set it in .streamlit/secrets.toml or as an environment variable."
+        )
+
+    conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
     return conn
 
 
@@ -25,7 +34,7 @@ def init_db():
     # Problems table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS problems (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             title TEXT NOT NULL,
             description TEXT,
             observed_context TEXT,
@@ -41,7 +50,7 @@ def init_db():
     # Ideas table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS ideas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             title TEXT NOT NULL,
             pitch TEXT,
             target_user TEXT,
@@ -60,11 +69,9 @@ def init_db():
     # Problem-Idea links (many-to-many)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS problem_idea_links (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            problem_id INTEGER NOT NULL,
-            idea_id INTEGER NOT NULL,
-            FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE,
-            FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE CASCADE,
+            id SERIAL PRIMARY KEY,
+            problem_id INTEGER NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+            idea_id INTEGER NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
             UNIQUE(problem_id, idea_id)
         )
     """)
@@ -72,15 +79,13 @@ def init_db():
     # Notes table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             note_type TEXT CHECK(note_type IN ('interview', 'competitor', 'pricing', 'tech', 'general')),
             content TEXT NOT NULL,
             links TEXT,
-            problem_id INTEGER,
-            idea_id INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE SET NULL,
-            FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE SET NULL
+            problem_id INTEGER REFERENCES problems(id) ON DELETE SET NULL,
+            idea_id INTEGER REFERENCES ideas(id) ON DELETE SET NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -98,12 +103,13 @@ def create_problem(title: str, description: str = "", observed_context: str = ""
     """Create a new problem and return its ID."""
     conn = get_connection()
     cursor = conn.cursor()
-    now = datetime.now().isoformat()
+    now = datetime.now()
     cursor.execute("""
         INSERT INTO problems (title, description, observed_context, severity, frequency, status, tags, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
     """, (title, description, observed_context, severity, frequency, status, tags, now, now))
-    problem_id = cursor.lastrowid
+    problem_id = cursor.fetchone()['id']
     conn.commit()
     conn.close()
     return problem_id
@@ -123,7 +129,7 @@ def get_problem_by_id(problem_id: int) -> Optional[dict]:
     """Get a single problem by ID."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM problems WHERE id = ?", (problem_id,))
+    cursor.execute("SELECT * FROM problems WHERE id = %s", (problem_id,))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
@@ -134,12 +140,12 @@ def update_problem(problem_id: int, title: str, description: str, observed_conte
     """Update an existing problem."""
     conn = get_connection()
     cursor = conn.cursor()
-    now = datetime.now().isoformat()
+    now = datetime.now()
     cursor.execute("""
         UPDATE problems
-        SET title = ?, description = ?, observed_context = ?, severity = ?,
-            frequency = ?, status = ?, tags = ?, updated_at = ?
-        WHERE id = ?
+        SET title = %s, description = %s, observed_context = %s, severity = %s,
+            frequency = %s, status = %s, tags = %s, updated_at = %s
+        WHERE id = %s
     """, (title, description, observed_context, severity, frequency, status, tags, now, problem_id))
     affected = cursor.rowcount
     conn.commit()
@@ -151,7 +157,7 @@ def delete_problem(problem_id: int) -> bool:
     """Delete a problem by ID."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM problems WHERE id = ?", (problem_id,))
+    cursor.execute("DELETE FROM problems WHERE id = %s", (problem_id,))
     affected = cursor.rowcount
     conn.commit()
     conn.close()
@@ -172,7 +178,7 @@ def get_recent_problems(limit: int = 5) -> list[dict]:
     """Get most recently added problems."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM problems ORDER BY created_at DESC LIMIT ?", (limit,))
+    cursor.execute("SELECT * FROM problems ORDER BY created_at DESC LIMIT %s", (limit,))
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
@@ -188,12 +194,13 @@ def create_idea(title: str, pitch: str = "", target_user: str = "", value_prop: 
     """Create a new idea and return its ID."""
     conn = get_connection()
     cursor = conn.cursor()
-    now = datetime.now().isoformat()
+    now = datetime.now()
     cursor.execute("""
         INSERT INTO ideas (title, pitch, target_user, value_prop, differentiation, assumptions, risks, status, score, tags, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
     """, (title, pitch, target_user, value_prop, differentiation, assumptions, risks, status, score, tags, now, now))
-    idea_id = cursor.lastrowid
+    idea_id = cursor.fetchone()['id']
     conn.commit()
     conn.close()
     return idea_id
@@ -213,7 +220,7 @@ def get_idea_by_id(idea_id: int) -> Optional[dict]:
     """Get a single idea by ID."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM ideas WHERE id = ?", (idea_id,))
+    cursor.execute("SELECT * FROM ideas WHERE id = %s", (idea_id,))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
@@ -225,12 +232,12 @@ def update_idea(idea_id: int, title: str, pitch: str, target_user: str, value_pr
     """Update an existing idea."""
     conn = get_connection()
     cursor = conn.cursor()
-    now = datetime.now().isoformat()
+    now = datetime.now()
     cursor.execute("""
         UPDATE ideas
-        SET title = ?, pitch = ?, target_user = ?, value_prop = ?, differentiation = ?,
-            assumptions = ?, risks = ?, status = ?, score = ?, tags = ?, updated_at = ?
-        WHERE id = ?
+        SET title = %s, pitch = %s, target_user = %s, value_prop = %s, differentiation = %s,
+            assumptions = %s, risks = %s, status = %s, score = %s, tags = %s, updated_at = %s
+        WHERE id = %s
     """, (title, pitch, target_user, value_prop, differentiation, assumptions, risks, status, score, tags, now, idea_id))
     affected = cursor.rowcount
     conn.commit()
@@ -242,7 +249,7 @@ def delete_idea(idea_id: int) -> bool:
     """Delete an idea by ID."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
+    cursor.execute("DELETE FROM ideas WHERE id = %s", (idea_id,))
     affected = cursor.rowcount
     conn.commit()
     conn.close()
@@ -263,7 +270,7 @@ def get_recent_ideas(limit: int = 5) -> list[dict]:
     """Get most recently added ideas."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM ideas ORDER BY created_at DESC LIMIT ?", (limit,))
+    cursor.execute("SELECT * FROM ideas ORDER BY created_at DESC LIMIT %s", (limit,))
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
@@ -279,12 +286,13 @@ def link_problem_to_idea(problem_id: int, idea_id: int) -> bool:
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            INSERT INTO problem_idea_links (problem_id, idea_id) VALUES (?, ?)
+            INSERT INTO problem_idea_links (problem_id, idea_id) VALUES (%s, %s)
         """, (problem_id, idea_id))
         conn.commit()
         conn.close()
         return True
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
+        conn.rollback()
         conn.close()
         return False
 
@@ -294,7 +302,7 @@ def unlink_problem_from_idea(problem_id: int, idea_id: int) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        DELETE FROM problem_idea_links WHERE problem_id = ? AND idea_id = ?
+        DELETE FROM problem_idea_links WHERE problem_id = %s AND idea_id = %s
     """, (problem_id, idea_id))
     affected = cursor.rowcount
     conn.commit()
@@ -309,7 +317,7 @@ def get_ideas_for_problem(problem_id: int) -> list[dict]:
     cursor.execute("""
         SELECT i.* FROM ideas i
         JOIN problem_idea_links pil ON i.id = pil.idea_id
-        WHERE pil.problem_id = ?
+        WHERE pil.problem_id = %s
     """, (problem_id,))
     rows = cursor.fetchall()
     conn.close()
@@ -323,7 +331,7 @@ def get_problems_for_idea(idea_id: int) -> list[dict]:
     cursor.execute("""
         SELECT p.* FROM problems p
         JOIN problem_idea_links pil ON p.id = pil.problem_id
-        WHERE pil.idea_id = ?
+        WHERE pil.idea_id = %s
     """, (idea_id,))
     rows = cursor.fetchall()
     conn.close()
@@ -334,7 +342,7 @@ def get_linked_problem_ids_for_idea(idea_id: int) -> list[int]:
     """Get IDs of all problems linked to an idea."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT problem_id FROM problem_idea_links WHERE idea_id = ?", (idea_id,))
+    cursor.execute("SELECT problem_id FROM problem_idea_links WHERE idea_id = %s", (idea_id,))
     rows = cursor.fetchall()
     conn.close()
     return [row['problem_id'] for row in rows]
@@ -344,9 +352,9 @@ def set_problem_links_for_idea(idea_id: int, problem_ids: list[int]):
     """Set the problem links for an idea (replaces existing links)."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM problem_idea_links WHERE idea_id = ?", (idea_id,))
+    cursor.execute("DELETE FROM problem_idea_links WHERE idea_id = %s", (idea_id,))
     for pid in problem_ids:
-        cursor.execute("INSERT INTO problem_idea_links (problem_id, idea_id) VALUES (?, ?)", (pid, idea_id))
+        cursor.execute("INSERT INTO problem_idea_links (problem_id, idea_id) VALUES (%s, %s)", (pid, idea_id))
     conn.commit()
     conn.close()
 
@@ -360,12 +368,13 @@ def create_note(note_type: str, content: str, links: str = "",
     """Create a new note and return its ID."""
     conn = get_connection()
     cursor = conn.cursor()
-    now = datetime.now().isoformat()
+    now = datetime.now()
     cursor.execute("""
         INSERT INTO notes (note_type, content, links, problem_id, idea_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id
     """, (note_type, content, links, problem_id, idea_id, now))
-    note_id = cursor.lastrowid
+    note_id = cursor.fetchone()['id']
     conn.commit()
     conn.close()
     return note_id
@@ -385,7 +394,7 @@ def get_note_by_id(note_id: int) -> Optional[dict]:
     """Get a single note by ID."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM notes WHERE id = ?", (note_id,))
+    cursor.execute("SELECT * FROM notes WHERE id = %s", (note_id,))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
@@ -398,8 +407,8 @@ def update_note(note_id: int, note_type: str, content: str, links: str,
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE notes
-        SET note_type = ?, content = ?, links = ?, problem_id = ?, idea_id = ?
-        WHERE id = ?
+        SET note_type = %s, content = %s, links = %s, problem_id = %s, idea_id = %s
+        WHERE id = %s
     """, (note_type, content, links, problem_id, idea_id, note_id))
     affected = cursor.rowcount
     conn.commit()
@@ -411,7 +420,7 @@ def delete_note(note_id: int) -> bool:
     """Delete a note by ID."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    cursor.execute("DELETE FROM notes WHERE id = %s", (note_id,))
     affected = cursor.rowcount
     conn.commit()
     conn.close()
@@ -422,7 +431,7 @@ def get_notes_for_problem(problem_id: int) -> list[dict]:
     """Get all notes attached to a problem."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM notes WHERE problem_id = ? ORDER BY created_at DESC", (problem_id,))
+    cursor.execute("SELECT * FROM notes WHERE problem_id = %s ORDER BY created_at DESC", (problem_id,))
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
@@ -432,11 +441,7 @@ def get_notes_for_idea(idea_id: int) -> list[dict]:
     """Get all notes attached to an idea."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM notes WHERE idea_id = ? ORDER BY created_at DESC", (idea_id,))
+    cursor.execute("SELECT * FROM notes WHERE idea_id = %s ORDER BY created_at DESC", (idea_id,))
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
-
-
-# Initialize DB on module import
-init_db()
