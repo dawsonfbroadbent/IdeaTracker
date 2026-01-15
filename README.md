@@ -1,6 +1,6 @@
 # Idea Vault
 
-A Streamlit-based tool to track startup problems and ideas. Data is stored locally in your browser using localStorage - no external database required.
+A Next.js app to track startup problems and ideas. Built for **free Vercel hosting** with data stored locally in your browser using localStorage - no external database required.
 
 ## Features
 
@@ -22,79 +22,80 @@ A Streamlit-based tool to track startup problems and ideas. Data is stored local
 
 Use the Export feature regularly to backup your data!
 
-## Deployment
+## Deployment to Vercel (Recommended)
 
-### Option 1: Streamlit Community Cloud (Recommended - Free)
+### One-Click Deploy
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/YOUR_USERNAME/IdeaTracker)
+
+### Manual Deploy
 
 1. Push this repository to GitHub
-2. Go to [share.streamlit.io](https://share.streamlit.io)
-3. Click "New app"
-4. Select your repository, branch, and set `Idea_Vault.py` as the main file
+2. Go to [vercel.com](https://vercel.com) and sign in with GitHub
+3. Click "Add New Project"
+4. Import your repository
 5. Click "Deploy"
 
-That's it! No environment variables or database setup required.
+That's it! Vercel automatically detects Next.js and configures everything.
 
-### Option 2: Run Locally
+## Run Locally
 
 ```bash
 # Clone the repository
 git clone <your-repo-url>
 cd IdeaTracker
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
 # Install dependencies
-pip install -r requirements.txt
+npm install
 
-# Run the app
-streamlit run Idea_Vault.py
+# Run development server
+npm run dev
 ```
 
-The app will open in your browser at `http://localhost:8501`.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### Option 3: Docker
+### Build for Production
 
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-EXPOSE 8501
-CMD ["streamlit", "run", "Idea_Vault.py", "--server.port=8501", "--server.address=0.0.0.0"]
-```
-
-Build and run:
 ```bash
-docker build -t idea-vault .
-docker run -p 8501:8501 idea-vault
+npm run build
+npm start
 ```
-
-### Note on Vercel
-
-Vercel's serverless architecture is not well-suited for Streamlit apps (which require a persistent server process). For free hosting, **Streamlit Community Cloud** is the recommended option for Streamlit applications.
 
 ## Project Structure
 
 ```
 IdeaTracker/
-├── Idea_Vault.py          # Main app entry point
-├── database.py            # Database API (wrapper for storage)
-├── storage.py             # Browser localStorage implementation
-├── pages/
-│   ├── 1_Dashboard.py     # Overview dashboard
-│   ├── 2_Problems.py      # Problems management
-│   ├── 3_Ideas.py         # Ideas management
-│   └── 4_Notes.py         # Notes management
-├── requirements.txt       # Python dependencies
-├── vercel.json           # Vercel config (limited support)
-└── README.md             # This file
+├── src/
+│   ├── app/
+│   │   ├── layout.tsx        # Root layout with sidebar navigation
+│   │   ├── page.tsx          # Home page with stats & data management
+│   │   ├── globals.css       # Tailwind CSS styles
+│   │   ├── dashboard/
+│   │   │   └── page.tsx      # Dashboard overview
+│   │   ├── problems/
+│   │   │   └── page.tsx      # Problems CRUD
+│   │   ├── ideas/
+│   │   │   └── page.tsx      # Ideas CRUD
+│   │   └── notes/
+│   │       └── page.tsx      # Notes CRUD
+│   └── lib/
+│       ├── storage.ts        # localStorage CRUD operations
+│       └── types.ts          # TypeScript interfaces
+├── package.json              # Node.js dependencies
+├── tsconfig.json             # TypeScript config
+├── tailwind.config.js        # Tailwind CSS config
+├── next.config.js            # Next.js config
+├── vercel.json               # Vercel deployment config
+└── README.md                 # This file
 ```
+
+## Tech Stack
+
+- **Framework**: Next.js 14 (App Router)
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS
+- **Storage**: Browser localStorage
+- **Hosting**: Vercel (free tier)
 
 ## Data Model
 
@@ -129,7 +130,7 @@ After deployment, test the following:
 3. **Update**: Edit an existing item and verify changes persist
 4. **Delete**: Delete an item and verify it's removed
 5. **Linking**: Link an idea to a problem and verify the relationship
-6. **Export**: Export your data to JSON
+6. **Export**: Export your data to JSON (Home page)
 7. **Import**: Import the JSON backup and verify data
 8. **Refresh**: Refresh the page and verify data persists
 9. **Browser close/reopen**: Close and reopen browser, verify data persists

@@ -1,15 +1,3 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "Idea_Vault.py",
-      "use": "@vercel/python"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "Idea_Vault.py"
-    }
-  ]
+  "framework": "nextjs"
 }
